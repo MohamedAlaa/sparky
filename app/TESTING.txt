@@ -17,7 +17,7 @@ This ZIP contains Sparky.app directly, not a DMG. No installer is needed.
    The app owner can use Set up Google sign-in in Sparky to paste the Google
    Desktop client JSON, then package again. Shared configured builds need no setup.
    Outlook needs an OAuth access token; other mail needs an app password.
-   Sign in again after restarting; credentials stay in memory for the session.
+   Connected accounts are saved in your macOS Keychain and stay signed in.
 5. Send feedback to the person who shared this build: include what you clicked,
    what you expected, what happened, and your macOS version and Mac processor.
    Avoid including passwords, tokens or private mail in screenshots.
@@ -77,14 +77,14 @@ Otherwise, complete these steps in the same Google Cloud project throughout.
 IF GOOGLE SIGN-IN DOES NOT WORK
 For the "has not completed the Google verification process" / tester-only
 403 block, follow GOOGLE ACCESS FIX.txt included beside this file.
+Full step-by-step guide: https://github.com/MohamedAlaa/sparky/blob/main/docs/google-setup.md
 - Access denied / 403: check Audience > Test users, the sign-in address,
   and that Gmail API and the Desktop client belong to the same project.
   A work account may also need its administrator to allow the app.
 - Missing permissions: confirm both scopes in Data Access, disconnect the
   account in Sparky, and sign in again, granting both requested permissions.
 - Wrong client type: create a Desktop app client and paste its JSON again.
-- Testing access can expire; sign in again when prompted. Each app restart
-  also requires sign-in because Sparky keeps account tokens only in memory.
+- Testing access can expire (often after 7 days); sign in again when prompted.
 - Public distribution with these sensitive/restricted scopes requires
   Google's verification process; adding scopes alone does not verify an app.
 

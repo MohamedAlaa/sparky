@@ -18,6 +18,8 @@ Connected accounts are stored in macOS Keychain and restored after restarting, i
 
 ### Google sign-in setup (app owner, once)
 
+**Start with the step-by-step guide: [docs/google-setup.md](../docs/google-setup.md)** (Gmail API, consent screen, test users, Desktop client, troubleshooting). Technical details follow.
+
 The app uses Google's desktop authorization-code flow with PKCE S256, a random state, and a temporary callback bound only to `127.0.0.1` on an OS-assigned port. It opens the system browser, handles the callback automatically, verifies granted scopes, and obtains the account address from Gmail. Cancel, denial, invalid callbacks, and a three-minute timeout are handled without blocking the interface. Access and refresh tokens are stored only in macOS Keychain and never enter the mailbox database, app bundle or command-line arguments. Disconnect removes the saved session; it does not revoke Google's consent grant (which users can remove in their Google account).
 
 1. In Google Cloud, create a project, enable the Gmail API, and configure the OAuth consent screen with `https://www.googleapis.com/auth/gmail.readonly` and `https://www.googleapis.com/auth/gmail.send`.

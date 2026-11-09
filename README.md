@@ -30,6 +30,7 @@ Inspired by Superhuman and Spark. On-device AI. Only the features I actually wan
 <a href="#-ai-that-stays-on-your-mac">AI</a> ·
 <a href="#-privacy">Privacy</a> ·
 <a href="#-get-started">Get started</a> ·
+<a href="docs/google-setup.md">Gmail setup</a> ·
 <a href="#-under-the-hood">Under the hood</a> ·
 <a href="#-credits">Credits</a>
 
@@ -184,7 +185,7 @@ Sparky sorts and labels mail with a model **you** choose — and never silently 
 - **Local first.** Mail is stored in SQLite (WAL + FTS5) on your Mac. Folder moves, stars, snoozes and labels stay local.
 - **Keychain only.** OAuth refresh tokens and app passwords live in the macOS Keychain — never in the database, the app bundle, logs or command-line arguments.
 - **No telemetry, no backend, no account.** Sparky talks only to your mail provider and the AI provider you picked.
-- **No secrets in this repo.** Google sign-in needs *your own* Desktop OAuth client ([setup guide](app/README.md#google-sign-in-setup-app-owner-once)).
+- **No secrets in this repo.** Google sign-in needs *your own* Desktop OAuth client ([10-minute setup guide](docs/google-setup.md)).
 
 ---
 
@@ -203,7 +204,7 @@ cargo run --release
 
 It opens with a demo mailbox so you can try everything immediately (a clean copy lives in [`app/demo/`](app/demo/README.md) — sample mail only). Then click **Connect email account**:
 
-- **Gmail** — *Continue with Google* (one-time [Google Cloud setup](app/README.md#google-sign-in-setup-app-owner-once) for your own OAuth client).
+- **Gmail** — *Continue with Google*. First, a one-time Google Cloud setup: enable the Gmail API, add yourself (and friends) as **test users**, create a Desktop OAuth client. 👉 **[Step-by-step guide](docs/google-setup.md)**
 - **IMAP/SMTP** — your address, an app password and your TLS hosts.
 - **Outlook / Microsoft 365** — address plus a Graph access token (browser sign-in coming).
 
