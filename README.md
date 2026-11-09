@@ -194,29 +194,58 @@ Sparky sorts and labels mail with a model **you** choose — and never silently 
 > [!IMPORTANT]
 > Sparky is an **early alpha** built in a weekend. It's my daily driver, but expect rough edges — see [what's not done yet](#%EF%B8%8F-roadmap).
 
-**Requirements:** macOS (Apple silicon or Intel), [Rust](https://rustup.rs) stable, and Xcode command line tools (`xcode-select --install`).
+### 1 · Download
+
+<p align="center">
+  <a href="https://github.com/MohamedAlaa/sparky/releases/latest/download/Sparky.dmg">
+    <img alt="Download Sparky for macOS" src="https://img.shields.io/badge/Download-Sparky.dmg-8b5cf6?style=for-the-badge&logo=apple&logoColor=white" height="56">
+  </a>
+  <br>
+  <sub>macOS 11+ · Apple silicon · ~4 MB · <a href="https://github.com/MohamedAlaa/sparky/releases">all releases</a></sub>
+</p>
+
+Open **Sparky.dmg** and drag **Sparky** onto **Applications**.
+
+### 2 · First launch
+
+Sparky isn't notarized by Apple yet, so macOS asks once:
+
+1. Open Sparky from Applications. macOS says it *can't verify* the app — click **Done**.
+2. Go to **System Settings → Privacy & Security**, scroll down to *"Sparky was blocked…"* and click **Open Anyway**, then confirm.
+
+<details>
+<summary>Prefer Terminal?</summary>
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Sparky.app
+```
+
+</details>
+
+It opens with a demo mailbox, so you can try every shortcut right away.
+
+### 3 · Connect your mail
+
+Click **Connect email account**:
+
+- **Gmail** — Sparky signs in with **your own** free Google Cloud client, so your mail never passes through anyone else's servers. One-time setup, about 10 minutes: enable the Gmail API, add yourself as a **test user**, create a Desktop OAuth client, paste its JSON into Sparky, then **Continue with Google**.
+  👉 **[Step-by-step Google setup guide](docs/google-setup.md)** (the app links to it too).
+- **IMAP/SMTP** — your address, an app password and your TLS hosts. Works instantly.
+- **Outlook / Microsoft 365** — address plus a Graph access token (browser sign-in coming).
+
+Accounts are saved in your macOS Keychain and stay connected.
+
+### Build from source
+
+**Requirements:** macOS, [Rust](https://rustup.rs) stable, and Xcode command line tools (`xcode-select --install`).
 
 ```bash
 git clone https://github.com/MohamedAlaa/sparky.git
 cd sparky/app
-cargo run --release
+cargo run --release          # a clean demo mailbox lives in app/demo/
+cargo test                   # never touches your real Keychain or mailbox
+./scripts/make-dmg.sh        # build your own Sparky.dmg
 ```
-
-It opens with a demo mailbox so you can try everything immediately (a clean copy lives in [`app/demo/`](app/demo/README.md) — sample mail only). Then click **Connect email account**:
-
-- **Gmail** — *Continue with Google*. First, a one-time Google Cloud setup: enable the Gmail API, add yourself (and friends) as **test users**, create a Desktop OAuth client. 👉 **[Step-by-step guide](docs/google-setup.md)**
-- **IMAP/SMTP** — your address, an app password and your TLS hosts.
-- **Outlook / Microsoft 365** — address plus a Graph access token (browser sign-in coming).
-
-**Make a `.app`:** double-click [`app/Package for colleagues.command`](app/Package%20for%20colleagues.command) → `app/dist/Sparky-macOS-<arch>.zip`.
-
-**Run the tests:**
-
-```bash
-cd app && cargo test
-```
-
-Tests never touch your real Keychain or mailbox.
 
 ---
 

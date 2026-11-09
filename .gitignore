@@ -23,6 +23,7 @@
 !/app/src/
 !/app/demo/
 !/app/native/
+!/app/scripts/
 !/app/assets/
 !/app/shots/
 !/app/build.rs

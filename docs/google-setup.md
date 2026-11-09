@@ -106,8 +106,8 @@ Tips:
 
 ## 6. Paste the JSON into Sparky
 
-1. Run Sparky (`cd app && cargo run --release`).
-2. Click **Connect email account → Gmail → Set up Google sign-in · app owner**.
+1. Open Sparky (from the [DMG](https://github.com/MohamedAlaa/sparky/releases/latest), or `cd app && cargo run --release`).
+2. Click **Connect email account → Gmail**. The panel **Set up your own Google sign-in** is open there.
 3. Open the downloaded JSON in TextEdit, copy **all** of it, paste it in, and
    click **Save Google setup**.
 

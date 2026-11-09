@@ -2075,11 +2075,12 @@ impl App {
                     }
                     if !google_ready {
                         ui.label(RichText::new("Google sign-in is not configured for this copy of Sparky.").small().color(MUTED));
-                        ui.collapsing("Set up Google sign-in · app owner", |ui| {
-                            ui.label("Mail apps register with Google before people can sign in. Configure Sparky once, then package it to share browser sign-in with everyone.");
-                            ui.hyperlink_to("Open Google Cloud setup", "https://console.cloud.google.com/apis/credentials");
-                            ui.label("Enable the Gmail API, configure the consent screen for Gmail reading and sending, and create a Desktop app OAuth client. Add test users while testing; public distribution requires Google's verification.");
-                            ui.label("Download the client's JSON file, open it in TextEdit, and paste its contents here.");
+                        CollapsingHeader::new("Set up your own Google sign-in · one time, about 10 minutes").default_open(true).show(ui, |ui| {
+                            ui.label("Sparky doesn't route your mail through anyone's servers, so it signs in with your own free Google Cloud client.");
+                            ui.hyperlink_to("📖 Step-by-step guide", "https://github.com/MohamedAlaa/sparky/blob/main/docs/google-setup.md");
+                            ui.hyperlink_to("Open Google Cloud console", "https://console.cloud.google.com/");
+                            ui.label("1. Enable the Gmail API.  2. Configure the consent screen.  3. Add your Gmail address under Audience → Test users.  4. Add the gmail.readonly and gmail.send scopes.  5. Create a Desktop app OAuth client and download its JSON.");
+                            ui.label("Open the downloaded JSON in TextEdit, copy all of it, and paste it here.");
                             ui.add(TextEdit::multiline(&mut self.google_setup_json).desired_rows(4).desired_width(f32::INFINITY).hint_text("Paste Google Desktop app JSON"));
                             if ui.button("Save Google setup").clicked() {
                                 match oauth::save_configuration(&self.google_setup_json) {
