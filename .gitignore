@@ -1,0 +1,46 @@
+# Allowlist: everything is ignored unless listed below.
+# This folder also holds a real local mailbox (SQLite), build output and
+# private working files; none of that may ever reach the public repo.
+/*
+!/.gitignore
+!/README.md
+!/LICENSE-MIT
+!/LICENSE-APACHE
+!/CONTRIBUTING.md
+!/SECURITY.md
+!/docs/
+!/promo/
+!/app/
+
+# promo: sources only. The 120 MB master exceeds GitHub's file limit;
+# docs/media/sparky-promo.mp4 is the shareable cut.
+/promo/*
+!/promo/README.md
+!/promo/source/
+
+# app: source, assets and docs only.
+/app/*
+!/app/src/
+!/app/demo/
+!/app/native/
+!/app/assets/
+!/app/shots/
+!/app/build.rs
+!/app/Cargo.toml
+!/app/Cargo.lock
+!/app/README.md
+!/app/mailbox.json
+!/app/TESTING.txt
+!/app/GOOGLE ACCESS FIX.txt
+!/app/Package for colleagues.command
+
+# Never commit, wherever they appear.
+.DS_Store
+*.sqlite3*
+google-oauth.json
+*.log
+target/
+dist/
+
+# The one database allowed: a clean demo mailbox (sample mail only).
+!/app/demo/sparky.sqlite3

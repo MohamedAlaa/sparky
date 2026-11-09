@@ -1,0 +1,56 @@
+SPARKY MAIL CLIENT - FIX GOOGLE ACCESS BLOCKED (403 access_denied)
+
+If Google says the app is being tested and only developer-approved testers
+can access it, the app owner must add your Google account as a test user.
+This is a Google Cloud setting. Reinstalling Sparky will not grant access.
+
+APP OWNER: ADD THE TESTER
+1. Sign in at https://console.cloud.google.com/ with the account that owns
+   Sparky Mail Client's Google Cloud project.
+2. Select the project containing the Desktop OAuth client used by this
+   Sparky build. Under Google Auth platform > Clients, compare the client
+   ID with the client_id in the Desktop JSON used to configure Sparky.
+   The displayed app name alone does not identify the correct project.
+3. Open Google Auth platform > Audience. Older screens start at
+   APIs & Services > OAuth consent screen.
+4. For an External app with publishing status Testing, find Test users,
+   click Add users, enter the tester's Google address, and click Save.
+   Add each colleague's actual Google sign-in address before inviting them.
+   Use the account address, not a mailing list or alternate email alias.
+5. Confirm the address appears in the saved Test users list.
+
+PERSON SIGNING IN: TRY AGAIN
+1. Close the blocked Google page. In Sparky, cancel the pending sign-in
+   (or wait for it to time out), then click Continue with Google again.
+2. Choose the exact account the owner added.
+3. Review the app and permissions. Continue only if you trust the app,
+   and approve the requested inbox reading and sending permissions.
+4. Confirm Sparky shows the right account, sync the inbox, and send a
+   test message to yourself to check the connection.
+
+If you do not own the Cloud project, ask the person who shared Sparky to
+complete the owner steps above. They do not need your password or tokens.
+Adding a test user to the existing project does not require a new build.
+
+STILL BLOCKED?
+- Recheck that the saved test address matches the account chosen in Google.
+- Recheck the client ID and project; a different project's tester list
+  does not apply to this build. If the owner changes the Desktop client,
+  save the new JSON in Sparky and package again for colleagues.
+- A Google Workspace administrator may also restrict this app. Ask your
+  administrator to review its OAuth access using the app's client ID.
+- Internal audience permits only accounts in the project's Workspace
+  organization; it does not enable access for outside colleagues.
+- Testing allows up to 100 listed test users. Gmail testing authorization
+  can expire after seven days; reconnect when needed. Sparky also requires
+  sign-in after restarting because account tokens remain in memory only.
+
+FOR WIDER RELEASE
+Keep Testing for approved testers. Publishing is not the same as Google
+verification. Plan Google's verification requirements for Sparky's sensitive
+and restricted Gmail permissions before distributing publicly; changing
+publishing status alone does not complete that process.
+
+Google references:
+https://support.google.com/cloud/answer/15549945?hl=en
+https://developers.google.com/identity/protocols/oauth2/production-readiness/overview

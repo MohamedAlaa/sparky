@@ -1,0 +1,107 @@
+SPARKY — COLLEAGUE TEST BUILD
+
+INSTALL ON YOUR MAC
+This ZIP contains Sparky.app directly, not a DMG. No installer is needed.
+
+1. Double-click the ZIP to unzip it, then open the extracted folder.
+2. Drag Sparky.app onto the Applications shortcut beside it (or into the
+   Applications folder in Finder). Then open Sparky from Applications.
+   Rust and developer tools are not needed.
+3. This is an internal, ad-hoc signed test build, not an Apple-notarized release.
+   If macOS blocks it, try opening it once, then go to System Settings >
+   Privacy & Security > Open Anyway and confirm only if you trust the sender.
+   Your organization's security policy may require an approved signed build.
+4. Explore the demo inbox, compose, search and keyboard shortcuts (? or Cmd+/).
+   Use Connect email account to test real mail. Real Send sends real email.
+   For Gmail, click Continue with Google and sign in in your browser.
+   The app owner can use Set up Google sign-in in Sparky to paste the Google
+   Desktop client JSON, then package again. Shared configured builds need no setup.
+   Outlook needs an OAuth access token; other mail needs an app password.
+   Sign in again after restarting; credentials stay in memory for the session.
+5. Send feedback to the person who shared this build: include what you clicked,
+   what you expected, what happened, and your macOS version and Mac processor.
+   Avoid including passwords, tokens or private mail in screenshots.
+
+ENABLE GMAIL API AND GOOGLE SIGN-IN (APP OWNER, ONCE)
+If your shared build already has Google setup, just use Continue with Google.
+Otherwise, complete these steps in the same Google Cloud project throughout.
+
+1. Open https://console.cloud.google.com/ and sign in as the app owner.
+   At the top, select your project, or choose New project, name it Sparky,
+   click Create, and select it.
+2. Open the menu > APIs & Services > Library. Search for Gmail API, open
+   Gmail API, and click Enable. If it shows Manage, it is already enabled.
+3. Open Google Auth platform > Branding (older screens call this
+   APIs & Services > OAuth consent screen). If prompted, click Get Started.
+   Enter Sparky as the app name, select your support email, and click Next.
+   Choose External for personal Gmail or testers outside your organization.
+   Internal is only for accounts in your Google Workspace organization.
+   Enter your contact email, review and accept Google's policy if you agree,
+   then finish with Continue > Create. Existing projects can edit Branding.
+4. For External testing, open Google Auth platform > Audience. Keep the
+   publishing status as Testing. Under Test users, click Add users, enter
+   your Gmail address and each colleague's Google sign-in address, then Save.
+5. Select the Gmail permissions. On the Create credentials wizard shown in
+   the screenshot, you are at step 3, Scopes (optional). Click Add or remove
+   scopes. In the newer console, use Google Auth platform > Data Access >
+   Add or remove scopes instead. Select these two exact scope URLs:
+
+   https://www.googleapis.com/auth/gmail.readonly
+   https://www.googleapis.com/auth/gmail.send
+
+   Search/filter the list by gmail.readonly and gmail.send and check both.
+   If missing, enter the full URLs in Manually add scopes, one per line,
+   then click Add to table. Click Update to apply the selection.
+   Confirm gmail.readonly is under Your restricted scopes (read mail) and
+   gmail.send is under Your sensitive scopes (send mail). The non-sensitive
+   table can stay empty. Save and continue in the wizard, or Save in Data
+   Access. Although the wizard says optional, add both for Sparky.
+6. In the wizard's OAuth Client ID step, choose Desktop app as the
+   application type, name it Sparky Desktop, and click Create.
+   In the newer console: Google Auth platform > Clients > Create client >
+   Desktop app > name it Sparky Desktop > Create. Download the client JSON
+   from the result or the client's details. Use a Desktop app client,
+   not an API key, service account, or Web application client.
+7. Open the JSON in TextEdit and copy its entire contents. In Sparky, open
+   Connect email account > Gmail > Set up Google sign-in · app owner.
+   Paste the JSON and click Save Google setup.
+8. Click Continue with Google, choose an account listed in Test users,
+   and approve both reading and sending permissions. Check the connected
+   address, sync the inbox, then send a test email to yourself.
+9. To share the configured app, on the build Mac double-click Package for
+   colleagues.command in the source app folder. Share the newly generated
+   dist/Sparky-macOS-arm64.zip (Apple silicon) or x86_64.zip (Intel).
+   Each colleague still signs in to their own account and must be a test
+   user while the External app is in Testing.
+
+IF GOOGLE SIGN-IN DOES NOT WORK
+For the "has not completed the Google verification process" / tester-only
+403 block, follow GOOGLE ACCESS FIX.txt included beside this file.
+- Access denied / 403: check Audience > Test users, the sign-in address,
+  and that Gmail API and the Desktop client belong to the same project.
+  A work account may also need its administrator to allow the app.
+- Missing permissions: confirm both scopes in Data Access, disconnect the
+  account in Sparky, and sign in again, granting both requested permissions.
+- Wrong client type: create a Desktop app client and paste its JSON again.
+- Testing access can expire; sign in again when prompted. Each app restart
+  also requires sign-in because Sparky keeps account tokens only in memory.
+- Public distribution with these sensitive/restricted scopes requires
+  Google's verification process; adding scopes alone does not verify an app.
+
+Google's setup and scope references:
+https://developers.google.com/workspace/gmail/api/quickstart/python
+https://developers.google.com/workspace/guides/configure-oauth-consent
+https://developers.google.com/workspace/gmail/api/auth/scopes
+
+COMPATIBILITY
+Use the arm64 ZIP on Apple silicon Macs, or the x86_64 ZIP on Intel Macs.
+This package is built for the sender's processor type, not both types.
+It requires macOS 11 or later; other Mac versions have not been verified.
+
+YOUR MAIL DATA
+Each user gets a separate mailbox in:
+~/Library/Application Support/Sparky/
+The package includes the app's Google registration when configured, but never
+the sender's mailbox, passwords or account tokens.
+Replacing the app keeps your local mailbox. Quitting and moving that Sparky
+data folder elsewhere resets local test data (including local-only drafts).
