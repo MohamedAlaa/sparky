@@ -5,13 +5,14 @@
 <h3>I got fed up with email clients. So I built my own — over a weekend.</h3>
 
 <p>
-A native, keyboard-first mail client for macOS, written in pure Rust.<br>
+A native, keyboard-first mail client for macOS and Linux, written in pure Rust.<br>
 Inspired by Superhuman and Spark. On-device AI. Only the features I actually want.
 </p>
 
 <p>
 <img alt="100% Rust" src="https://img.shields.io/badge/100%25-Rust-b7410e?style=for-the-badge&logo=rust&logoColor=white">
 <img alt="macOS" src="https://img.shields.io/badge/macOS-native-111111?style=for-the-badge&logo=apple&logoColor=white">
+<img alt="Ubuntu" src="https://img.shields.io/badge/Ubuntu-native-e95420?style=for-the-badge&logo=ubuntu&logoColor=white">
 <img alt="On-device AI" src="https://img.shields.io/badge/AI-on--device-8b5cf6?style=for-the-badge">
 <img alt="License" src="https://img.shields.io/badge/license-MIT%20%7C%20Apache--2.0-2563eb?style=for-the-badge">
 <img alt="Status" src="https://img.shields.io/badge/status-early%20alpha-f59e0b?style=for-the-badge">
@@ -182,8 +183,8 @@ Sparky sorts and labels mail with a model **you** choose — and never silently 
 
 ## 🔒 Privacy
 
-- **Local first.** Mail is stored in SQLite (WAL + FTS5) on your Mac. Folder moves, stars, snoozes and labels stay local.
-- **Keychain only.** OAuth refresh tokens and app passwords live in the macOS Keychain — never in the database, the app bundle, logs or command-line arguments.
+- **Local first.** Mail is stored in SQLite (WAL + FTS5) on your computer. Folder moves, stars, snoozes and labels stay local.
+- **Keychain only.** OAuth refresh tokens and app passwords live in the macOS Keychain (or your Linux keyring) — never in the database, the app bundle, logs or command-line arguments.
 - **No telemetry, no backend, no account.** Sparky talks only to your mail provider and the AI provider you picked.
 - **No secrets in this repo.** Google sign-in needs *your own* Desktop OAuth client ([10-minute setup guide](docs/google-setup.md)).
 
@@ -201,14 +202,28 @@ Sparky sorts and labels mail with a model **you** choose — and never silently 
     <img alt="Download Sparky for macOS" src="https://img.shields.io/badge/Download-Sparky.dmg-8b5cf6?style=for-the-badge&logo=apple&logoColor=white" height="56">
   </a>
   <br>
-  <sub>macOS 11+ · Apple silicon · ~4 MB · <a href="https://github.com/MohamedAlaa/sparky/releases">all releases</a></sub>
+  <sub>macOS 11+ · Apple silicon · ~4 MB</sub>
+  <br><br>
+  <a href="https://github.com/MohamedAlaa/sparky/releases/latest/download/sparky_amd64.deb">
+    <img alt="Download Sparky for Ubuntu" src="https://img.shields.io/badge/Download-Ubuntu%20.deb-e95420?style=for-the-badge&logo=ubuntu&logoColor=white" height="56">
+  </a>
+  <br>
+  <sub>Ubuntu 22.04+ · x86-64 · ~5 MB · <a href="https://github.com/MohamedAlaa/sparky/releases/latest">ARM64 and .tar.gz builds</a> · <a href="https://github.com/MohamedAlaa/sparky/releases">all releases</a></sub>
 </p>
 
-Open **Sparky.dmg** and drag **Sparky** onto **Applications**.
+**macOS:** open **Sparky.dmg** and drag **Sparky** onto **Applications**.
+
+**Ubuntu / Debian:** install the package, then open Sparky from your app launcher:
+
+```bash
+sudo apt install ./sparky_amd64.deb        # sparky_arm64.deb on ARM
+```
+
+Other distros: unpack `sparky-linux-<arch>.tar.gz` and run `bin/sparky` (needs `libsqlite3`, `curl`, `openssl`, `xdg-open` and `secret-tool`).
 
 ### 2 · First launch
 
-Sparky isn't notarized by Apple yet, so macOS asks once:
+On Linux there's nothing to approve; skip ahead. Sparky isn't notarized by Apple yet, so macOS asks once:
 
 1. Open Sparky from Applications. macOS says it *can't verify* the app — click **Done**.
 2. Go to **System Settings → Privacy & Security**, scroll down to *"Sparky was blocked…"* and click **Open Anyway**, then confirm.
@@ -233,7 +248,7 @@ Click **Connect email account**:
 - **IMAP/SMTP** — your address, an app password and your TLS hosts. Works instantly.
 - **Outlook / Microsoft 365** — address plus a Graph access token (browser sign-in coming).
 
-Accounts are saved in your macOS Keychain and stay connected.
+Accounts are saved in your macOS Keychain, or on Linux in your desktop keyring (GNOME Keyring / KWallet), and stay connected.
 
 ### Build from source
 
@@ -245,7 +260,10 @@ cd sparky/app
 cargo run --release          # a clean demo mailbox lives in app/demo/
 cargo test                   # never touches your real Keychain or mailbox
 ./scripts/make-dmg.sh        # build your own Sparky.dmg
+./scripts/make-linux.sh amd64 arm64   # Ubuntu .deb + .tar.gz, built in Docker
 ```
+
+On Linux you can also build natively: install `build-essential pkg-config libsqlite3-dev` and run `cargo run --release`.
 
 ---
 
@@ -258,7 +276,7 @@ app/
 │   ├── storage.rs      SQLite via raw FFI — WAL, mmap, FTS5, atomic index updates
 │   ├── sync.rs         Gmail REST · Microsoft Graph · IMAP/SMTP adapters
 │   ├── oauth.rs        Google desktop OAuth: PKCE S256, loopback callback
-│   ├── credentials.rs  macOS Keychain
+│   ├── credentials.rs  macOS Keychain / Linux Secret Service
 │   ├── classifier.rs   sender rules + LLM classification + learning from corrections
 │   ├── threading.rs    Message-ID / References conversation graph
 │   ├── shortcuts.rs    the one keyboard catalog + fuzzy matcher
@@ -270,7 +288,8 @@ app/
 ```
 
 - **Pure Rust UI** on [egui](https://github.com/emilk/egui) / eframe, painter-driven for pixel-level control.
-- **Tiny dependency tree**: eframe, egui_extras, image, serde, base64, url. SQLite is the one macOS ships.
+- **Tiny dependency tree**: eframe, egui_extras, image, serde, base64, url. SQLite is the one the OS ships.
+- **Same look everywhere**: macOS uses the installed San Francisco font; Linux builds embed [Inter](https://rsms.me/inter/) (SIL OFL), so text never falls back to whatever the distro has.
 - **Deterministic animation recording**: `cargo run -- --record <dir> <script>` drives the real UI with simulated time at 60 fps. The promo was composited from those frames with a CoreImage 3D renderer and a soundtrack synthesized in Swift — see [`promo/`](promo/README.md).
 
 ---
@@ -283,7 +302,8 @@ app/
 - [ ] Microsoft browser sign-in
 - [ ] Full MIME and international charset decoding for IMAP
 - [ ] Signed and notarized releases
-- [ ] Linux and Windows builds
+- [x] Linux builds (Ubuntu .deb, x86-64 and ARM64)
+- [ ] Windows builds
 
 Contributions, ideas and bug reports are very welcome — open an issue or a PR.
 

@@ -115,8 +115,22 @@ fn app_fonts() -> FontDefinitions {
             .or_default()
             .insert(0, "Apple San Francisco".into());
     }
+    // Elsewhere, ship Inter (SIL OFL, assets/fonts) for a San Francisco-like look
+    // instead of whatever fonts the distribution happens to have installed.
+    #[cfg(not(target_os = "macos"))]
+    for (name, bytes) in [
+        ("Inter", &include_bytes!("../assets/fonts/Inter-Regular.ttf")[..]),
+        ("writer-bold", &include_bytes!("../assets/fonts/Inter-Bold.ttf")[..]),
+        ("ui-medium", &include_bytes!("../assets/fonts/Inter-Medium.ttf")[..]),
+    ] {
+        fonts.font_data.insert(name.into(), FontData::from_static(bytes).into());
+    }
+    #[cfg(not(target_os = "macos"))]
+    fonts.families.entry(FontFamily::Proportional).or_default().insert(0, "Inter".into());
     let bold = std::fs::read("/System/Library/Fonts/Supplemental/Arial Bold.ttf").ok();
-    let family = if let Some(bytes) = bold {
+    let family = if cfg!(not(target_os = "macos")) {
+        vec!["writer-bold".into(), "Inter".into()]
+    } else if let Some(bytes) = bold {
         fonts
             .font_data
             .insert("writer-bold".into(), FontData::from_owned(bytes).into());
@@ -132,6 +146,8 @@ fn app_fonts() -> FontDefinitions {
         let mut medium = FontData::from_owned(bytes);
         medium.index = 10; // Installed Helvetica Neue Medium face.
         fonts.font_data.insert("ui-medium".into(), medium.into());
+        medium_family.insert(0, "ui-medium".into());
+    } else if cfg!(not(target_os = "macos")) {
         medium_family.insert(0, "ui-medium".into());
     }
     fonts
@@ -2132,7 +2148,7 @@ impl App {
             }
             if self.syncing.is_some() { ui.horizontal(|ui| {ui.spinner(); ui.label(if self.pending_account.is_some() { "Checking connection and importing inbox…" } else { "Connected · Downloading inbox in the background…" });}); }
             if !self.connect_error.is_empty() { ui.colored_label(Color32::from_rgb(180,65,65), &self.connect_error); }
-            ui.label(RichText::new("Connected accounts are saved securely in macOS Keychain.").small().color(MUTED));
+            ui.label(RichText::new(if cfg!(target_os = "macos") { "Connected accounts are saved securely in macOS Keychain." } else { "Connected accounts are saved securely in your system keyring." }).small().color(MUTED));
             ui.add_space(16.);
             ui.separator();
             ui.add_space(12.);
@@ -3930,8 +3946,20 @@ fn data_directory() -> Result<std::path::PathBuf, String> {
     if cfg!(debug_assertions) {
         return Ok(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")));
     }
+    support_directory()
+}
+/// Per-user app folder: Application Support on macOS, XDG data home elsewhere.
+fn support_directory() -> Result<std::path::PathBuf, String> {
     let home = std::env::var_os("HOME").ok_or("Could not locate your home folder")?;
-    Ok(std::path::PathBuf::from(home).join("Library/Application Support/Sparky"))
+    let home = std::path::PathBuf::from(home);
+    if cfg!(target_os = "macos") {
+        return Ok(home.join("Library/Application Support/Sparky"));
+    }
+    let base = std::env::var_os("XDG_DATA_HOME")
+        .filter(|d| !d.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| home.join(".local/share"));
+    Ok(base.join("Sparky"))
 }
 
 fn main() -> eframe::Result {

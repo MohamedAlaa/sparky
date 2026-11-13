@@ -82,8 +82,7 @@ impl Config {
     }
 }
 fn config_path() -> Result<std::path::PathBuf, String> {
-    let home = std::env::var_os("HOME").ok_or("Could not locate your home folder")?;
-    Ok(std::path::PathBuf::from(home).join("Library/Application Support/Sparky/google-oauth.json"))
+    Ok(crate::support_directory()?.join("google-oauth.json"))
 }
 /// Store only desktop client configuration, never account tokens or unrelated JSON.
 pub fn save_configuration(json: &str) -> Result<(), String> {
@@ -289,7 +288,7 @@ pub fn connect(
             ("prompt", "consent select_account"),
         ])
     );
-    let status = Command::new("/usr/bin/open")
+    let status = Command::new(if cfg!(target_os = "macos") { "/usr/bin/open" } else { "xdg-open" })
         .arg(&url)
         .status()
         .map_err(|_| "Could not open your browser")?;

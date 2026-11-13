@@ -106,16 +106,17 @@ Tips:
 
 ## 6. Paste the JSON into Sparky
 
-1. Open Sparky (from the [DMG](https://github.com/MohamedAlaa/sparky/releases/latest), or `cd app && cargo run --release`).
+1. Open Sparky (from the [DMG or Ubuntu package](https://github.com/MohamedAlaa/sparky/releases/latest), or `cd app && cargo run --release`).
 2. Click **Connect email account → Gmail**. The panel **Set up your own Google sign-in** is open there.
-3. Open the downloaded JSON in TextEdit, copy **all** of it, paste it in, and
+3. Open the downloaded JSON in a text editor (TextEdit, gedit…), copy **all** of it, paste it in, and
    click **Save Google setup**.
 
 Sparky checks that this is a Desktop client and saves only the client ID and
 secret to:
 
 ```
-~/Library/Application Support/Sparky/google-oauth.json
+~/Library/Application Support/Sparky/google-oauth.json     # macOS
+~/.local/share/Sparky/google-oauth.json                    # Linux
 ```
 
 **Alternative, using environment variables:**
@@ -140,7 +141,8 @@ runtime environment variables, build-time environment variables, a
 5. The browser tab says you can close it, and Sparky comes back to the front
    with the account connected. Your inbox downloads in the background.
 
-Your refresh token is saved in the **macOS Keychain**, so you stay signed in
+Your refresh token is saved in the **macOS Keychain** (on Linux, your desktop
+keyring via Secret Service), so you stay signed in
 across restarts. It never goes into the mailbox database, the app bundle or
 logs. Repeat for more Gmail accounts.
 

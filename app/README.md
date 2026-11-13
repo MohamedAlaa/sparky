@@ -53,6 +53,12 @@ Press and release **G**, then within 1.5 seconds press **I** (Inbox), **S** (Sta
 
 While writing, **⌘ Enter** sends (or saves locally without an account), **Esc** saves and closes the draft, and **⌘ Shift Backspace** discards. **⌘ B/I/U** apply bold/italic/underline, **⌘ Shift H** applies a heading and **⌘ Shift X** applies code. Use Tab/Shift Tab to move through native form controls. Letter shortcuts are suppressed in text fields, writers and dialogs, and repeated held keys cannot trigger mail actions or resend a message. Escape closes the topmost guide, command center or settings before saving a writer.
 
+## Linux (Ubuntu)
+
+`scripts/make-linux.sh [amd64] [arm64]` builds in Docker (from macOS or Linux) on Ubuntu 22.04, so the result runs on Ubuntu 22.04 and newer. It writes `dist/sparky_<version>_<arch>.deb` (installs `/usr/bin/sparky`, a desktop entry and the icon) and a portable `dist/sparky-<version>-linux-<arch>.tar.gz`, and refuses to package a build that embeds a Google OAuth client. Native Linux builds need `build-essential pkg-config libsqlite3-dev`.
+
+Platform differences: accounts are stored in the freedesktop Secret Service (GNOME Keyring, KWallet) through `secret-tool` (package `libsecret-tools`), with the secret passed over stdin. Release builds keep mail and the Google setup in `$XDG_DATA_HOME/Sparky` (default `~/.local/share/Sparky`). The browser opens with `xdg-open`. Linux builds embed Inter Regular, Medium and Bold (`assets/fonts`, SIL Open Font License) instead of San Francisco, so the interface looks the same on every distribution. Apple Foundation Model classification is unavailable; choose Ollama or your own server.
+
 ## Share with colleagues on Mac
 
 Double-click **Package for colleagues.command** in this folder (the build Mac
