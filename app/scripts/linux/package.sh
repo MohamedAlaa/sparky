@@ -50,7 +50,7 @@ Priority: optional
 Architecture: $arch
 Installed-Size: $size
 Depends: libc6 (>= 2.35), libsqlite3-0, libgl1, libxkbcommon0, libxkbcommon-x11-0, curl, openssl, xdg-utils, libsecret-tools
-Recommends: gnome-keyring
+Recommends: gnome-keyring, zenity
 Maintainer: BeGenius <noreply@begenius.dev>
 Description: Sparky - a calmer kind of email
  A native mail workspace for Gmail, Outlook and IMAP accounts.

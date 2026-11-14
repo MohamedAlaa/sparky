@@ -64,6 +64,7 @@ commands! {
     ("Show Notifications", "Categories", Mailbox, Num4, Modifiers::NONE, false, "4"),
     ("Send / save locally", "Writing", Writer, Enter, CMD, false, "⌘ Enter"),
     ("Discard draft", "Writing", Writer, Backspace, CMD_SHIFT, false, "⌘ ⇧ Backspace"),
+    ("Attach files", "Writing", Writer, A, CMD_SHIFT, false, "⌘ ⇧ A"),
     ("Bold", "Formatting", Editor, B, CMD, false, "⌘ B"),
     ("Italic", "Formatting", Editor, I, CMD, false, "⌘ I"),
     ("Underline", "Formatting", Editor, U, CMD, false, "⌘ U"),

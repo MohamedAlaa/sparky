@@ -3,6 +3,7 @@ mod credentials;
 mod date_groups;
 mod editor;
 mod icons;
+mod mime;
 mod oauth;
 mod recorder;
 mod shortcuts;
@@ -339,6 +340,34 @@ struct Mail {
     message_id: String,
     #[serde(default)]
     references: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    attachments: Vec<mime::Attachment>,
+}
+/// A file waiting in the writer.
+#[derive(Clone)]
+struct Outgoing {
+    path: std::path::PathBuf,
+    name: String,
+    size: u64,
+    mime: String,
+}
+/// An attachment download in flight; `open` opens it afterwards, otherwise it is saved.
+struct AttachmentJob {
+    key: String,
+    open: bool,
+    rx: std::sync::mpsc::Receiver<Result<Vec<u8>, String>>,
+}
+#[derive(Default)]
+struct Attachments {
+    outgoing: Vec<Outgoing>,
+    picking: Option<std::sync::mpsc::Receiver<Result<Vec<std::path::PathBuf>, String>>>,
+    jobs: Vec<AttachmentJob>,
+    errors: std::collections::HashMap<String, String>,
+}
+/// Stable identity of a received attachment across list reordering.
+fn attachment_key(mail: &Mail, index: usize) -> String {
+    let id = if mail.remote_id.is_empty() { &mail.message_id } else { &mail.remote_id };
+    format!("{}\u{1f}{id}\u{1f}{index}", mail.account)
 }
 #[derive(Serialize, Deserialize)]
 struct Stored {
@@ -590,6 +619,7 @@ struct App {
     bcc: String,
     show_bcc: bool,
     draft_signature: String,
+    attach: Attachments,
     draft_dirty_since: Option<std::time::Instant>,
     draft_saved: bool,
     subject: String,
@@ -679,6 +709,7 @@ fn sample() -> Vec<Mail> {
             remote_thread: String::new(),
             message_id: String::new(),
             references: Vec::new(),
+            attachments: Vec::new(),
         })
         .collect()
 }
@@ -872,6 +903,7 @@ impl App {
             bcc: String::new(),
             show_bcc: false,
             draft_signature: String::new(),
+            attach: Attachments::default(),
             draft_dirty_since: None,
             draft_saved: false,
             subject: String::new(),
@@ -1660,8 +1692,10 @@ impl App {
                 self.account = self.accounts.iter().find(|a| a.scope() == chosen).cloned();
             });
             ui.add_space(8.);
+            let chips = if self.attach.outgoing.is_empty() { 0. } else { 40. };
             self.editor
-                .show(ui, &mut self.body, &mut self.writer_focus, height);
+                .show(ui, &mut self.body, &mut self.writer_focus, height - chips);
+            self.outgoing_chips(ui);
             ui.separator();
             ui.horizontal(|ui| {
                 let can_submit = !self.to.trim().is_empty() && !self.body.trim().is_empty();
@@ -1682,7 +1716,11 @@ impl App {
                     .clicked()
                     || (submit && can_submit)
                 {
-                    if let Some(account) = self.account.clone() {
+                    let total: u64 = self.attach.outgoing.iter().map(|f| f.size).sum();
+                    if self.account.is_some() && total as usize > sync::SEND_LIMIT {
+                        self.toast = Toast::new(format!("Attachments total {}; the limit is 25 MB.", mime::human_size(total)));
+                    } else if let Some(account) = self.account.clone() {
+                        let files = self.attach.outgoing.clone();
                         let (to, cc, bcc, subject, body, html) = (
                             self.to.clone(),
                             self.cc.clone(),
@@ -1695,12 +1733,42 @@ impl App {
                         self.sending = Some(rx);
                         self.toast = Toast::new("Sending…");
                         std::thread::spawn(move || {
-                            let _ = tx.send(account.send(&to, &cc, &bcc, &subject, &body, &html));
+                            let files: Result<Vec<sync::OutFile>, String> = files
+                                .into_iter()
+                                .map(|f| {
+                                    let bytes = std::fs::read(&f.path).map_err(|e| format!("Could not read {}: {e}", f.name))?;
+                                    Ok(sync::OutFile { name: f.name, mime: f.mime, bytes })
+                                })
+                                .collect();
+                            let _ = tx.send(files.and_then(|files| account.send(&to, &cc, &bcc, &subject, &body, &html, &files)));
                         });
                     } else {
                         self.store_composed("Sent");
                         self.toast = Toast::new("Message saved locally to Sent");
                     }
+                }
+                let attach = shortcuts_enabled && shortcuts::consume(ui.ctx(), "Attach files");
+                let picking = self.attach.picking.is_some();
+                if ui
+                    .add_enabled(
+                        !picking,
+                        Button::image_and_text(
+                            Image::new(icons::Icon::Paperclip.source()).fit_to_exact_size(vec2(14., 14.)).tint(INK),
+                            medium_label(if picking { "Choosing…" } else { "Attach" }),
+                        )
+                        .shortcut_text(medium_label(&format!("{command} ⇧ A"))),
+                    )
+                    .on_hover_text("Attach files (or drag them onto the window)")
+                    .clicked()
+                    || (attach && !picking)
+                {
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    self.attach.picking = Some(rx);
+                    let ctx = ui.ctx().clone();
+                    std::thread::spawn(move || {
+                        let _ = tx.send(mime::pick_files());
+                        ctx.request_repaint();
+                    });
                 }
                 if ui
                     .add(Button::new(medium_label("Save draft")).shortcut_text(medium_label("Esc")))
@@ -1725,6 +1793,7 @@ impl App {
                     self.compose = false;
                     self.inline_reply = false;
                     self.body.clear();
+                    self.attach.outgoing.clear();
                 }
                 if self.sending.is_some() {
                     ui.spinner();
@@ -2186,6 +2255,7 @@ impl App {
         }
         self.writer_focus = true;
         self.editor.reset(Vec::new());
+        self.attach.outgoing.clear();
         self.to.clear();
         self.cc.clear();
         self.bcc.clear();
@@ -2198,8 +2268,252 @@ impl App {
         self.editing_draft = None;
         self.replying_to = None;
     }
+    /// Adds files to the writer, skipping folders, duplicates and anything over the send limit.
+    fn add_outgoing(&mut self, paths: Vec<std::path::PathBuf>) {
+        let mut total: u64 = self.attach.outgoing.iter().map(|f| f.size).sum();
+        let mut problems = Vec::new();
+        for path in paths {
+            if self.attach.outgoing.iter().any(|f| f.path == path) {
+                continue;
+            }
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            match std::fs::metadata(&path) {
+                Ok(meta) if meta.is_file() => {
+                    if total + meta.len() > sync::SEND_LIMIT as u64 {
+                        problems.push(format!("{name} would take attachments over 25 MB"));
+                        continue;
+                    }
+                    total += meta.len();
+                    self.attach.outgoing.push(Outgoing { mime: mime::guess_mime(&name).into(), name: mime::sanitize(&name), size: meta.len(), path });
+                }
+                Ok(_) => problems.push(format!("{name} is a folder; attach files instead")),
+                Err(_) => problems.push(format!("Could not read {name}")),
+            }
+        }
+        if let Some(problem) = problems.first() {
+            self.toast = Toast::new(problem.clone());
+        }
+    }
+    /// Copies writer files into the private cache so drafts and Sent keep them.
+    fn outgoing_attachments(&mut self) -> Vec<mime::Attachment> {
+        let cache = mime::cache_dir().ok();
+        let mut stored = Vec::new();
+        let mut failed = None;
+        for file in &mut self.attach.outgoing {
+            let cached = if cache.as_ref().is_some_and(|dir| file.path.parent() == Some(dir.as_path())) {
+                file.path.file_name().map(|n| n.to_string_lossy().into_owned())
+            } else {
+                match std::fs::read(&file.path).map_err(|e| e.to_string()).and_then(|bytes| mime::store(&file.name, &bytes)) {
+                    Ok(name) => {
+                        // Later saves reuse the cached copy instead of re-reading the original.
+                        if let Ok(path) = mime::cached_path(&name) { file.path = path; }
+                        Some(name)
+                    }
+                    Err(error) => { failed = Some(format!("Could not keep {}: {error}", file.name)); None }
+                }
+            };
+            stored.push(mime::Attachment { name: file.name.clone(), mime: file.mime.clone(), size: file.size, remote_id: String::new(), cached });
+        }
+        if let Some(error) = failed {
+            self.toast = Toast::new(error);
+        }
+        stored
+    }
+    fn outgoing_chips(&mut self, ui: &mut Ui) {
+        if self.attach.outgoing.is_empty() {
+            return;
+        }
+        let mut remove = None;
+        ScrollArea::horizontal().id_salt("outgoing-files").max_height(36.).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                for (i, file) in self.attach.outgoing.iter().enumerate() {
+                    Frame::new()
+                        .fill(Color32::from_rgb(244, 245, 249))
+                        .corner_radius(CORNER_RADIUS)
+                        .inner_margin(Margin::symmetric(8, 4))
+                        .show(ui, |ui| {
+                            ui.add(Image::new(icons::Icon::File.source()).fit_to_exact_size(vec2(13., 13.)).tint(MUTED));
+                            ui.label(RichText::new(&file.name).small().color(INK));
+                            ui.label(RichText::new(mime::human_size(file.size)).small().color(MUTED));
+                            if icons::icon_button(ui, icons::Icon::X, 18., MUTED, Color32::from_black_alpha(14))
+                                .on_hover_text("Remove attachment")
+                                .clicked()
+                            {
+                                remove = Some(i);
+                            }
+                        });
+                }
+            });
+        });
+        if let Some(i) = remove {
+            self.attach.outgoing.remove(i);
+        }
+    }
+    fn handle_dropped_files(&mut self, ctx: &Context) {
+        let (hovering, dropped) = ctx.input(|i| (!i.raw.hovered_files.is_empty(), i.raw.dropped_files.clone()));
+        let paths: Vec<_> = dropped.into_iter().filter_map(|f| f.path).collect();
+        if !paths.is_empty() {
+            if self.compose && self.sending.is_none() {
+                self.add_outgoing(paths);
+            } else {
+                self.toast = Toast::new("Start a message or reply, then drop files to attach them");
+            }
+        }
+        if hovering {
+            let rect = ctx.screen_rect();
+            let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("drop-overlay")));
+            painter.rect_filled(rect, 0., self.theme.color().gamma_multiply(0.12));
+            painter.rect_stroke(rect.shrink(6.), CORNER_RADIUS, Stroke::new(2., self.theme.color()), StrokeKind::Inside);
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                if self.compose { "Drop to attach" } else { "Start a message to attach files" },
+                FontId::proportional(20.),
+                INK,
+            );
+        }
+    }
+    fn poll_attachments(&mut self) {
+        if let Some(result) = self.attach.picking.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            self.attach.picking = None;
+            match result {
+                Ok(paths) if self.compose => self.add_outgoing(paths),
+                Ok(_) => {}
+                Err(error) => self.toast = Toast::new(error),
+            }
+        }
+        let mut finished = Vec::new();
+        self.attach.jobs.retain(|job| match job.rx.try_recv() {
+            Ok(result) => { finished.push((job.key.clone(), job.open, result)); false }
+            Err(std::sync::mpsc::TryRecvError::Empty) => true,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                finished.push((job.key.clone(), job.open, Err("The download stopped unexpectedly.".into())));
+                false
+            }
+        });
+        for (key, open, result) in finished {
+            let Some((mail_index, index)) = self.find_attachment(&key) else { continue };
+            let name = self.mails[mail_index].attachments[index].name.clone();
+            match result.and_then(|bytes| mime::store(&name, &bytes)) {
+                Ok(cached) => {
+                    self.mails[mail_index].attachments[index].cached = Some(cached);
+                    self.persist();
+                    self.use_attachment(mail_index, index, open);
+                }
+                Err(error) => { self.attach.errors.insert(key, error); }
+            }
+        }
+    }
+    fn find_attachment(&self, key: &str) -> Option<(usize, usize)> {
+        self.mails.iter().enumerate().find_map(|(m, mail)| {
+            (0..mail.attachments.len()).find(|&i| attachment_key(mail, i) == key).map(|i| (m, i))
+        })
+    }
+    /// Opens or saves a received attachment, downloading it first if needed.
+    fn attachment_action(&mut self, mail_index: usize, index: usize, open: bool) {
+        let mail = &self.mails[mail_index];
+        let key = attachment_key(mail, index);
+        if self.attach.jobs.iter().any(|j| j.key == key) {
+            return;
+        }
+        self.attach.errors.remove(&key);
+        let attachment = mail.attachments[index].clone();
+        if attachment.cached.as_ref().and_then(|c| mime::cached_path(c).ok()).is_some_and(|p| p.exists()) {
+            self.use_attachment(mail_index, index, open);
+            return;
+        }
+        let Some(account) = self.accounts.iter().find(|a| a.scope() == mail.account).cloned() else {
+            self.attach.errors.insert(key, "Reconnect this account to download the attachment.".into());
+            return;
+        };
+        let message_id = mail.remote_id.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || { let _ = tx.send(account.download_attachment(&message_id, &attachment)); });
+        self.attach.jobs.push(AttachmentJob { key, open, rx });
+    }
+    fn use_attachment(&mut self, mail_index: usize, index: usize, open: bool) {
+        let attachment = &self.mails[mail_index].attachments[index];
+        let key = attachment_key(&self.mails[mail_index], index);
+        let result = attachment
+            .cached
+            .as_deref()
+            .ok_or_else(|| "The attachment isn't downloaded yet.".to_owned())
+            .and_then(mime::cached_path)
+            .and_then(|path| {
+                if open {
+                    // Open a named copy so the viewer shows the real file name.
+                    let dir = std::env::temp_dir().join(format!("sparky-open-{}", std::process::id()));
+                    let copy = mime::save_copy(&path, &dir, &attachment.name)?;
+                    mime::open_path(copy.as_os_str()).map(|()| None)
+                } else {
+                    let saved = mime::save_copy(&path, &mime::downloads_dir()?, &attachment.name)?;
+                    Ok(Some(saved))
+                }
+            });
+        match result {
+            Ok(Some(saved)) => {
+                self.toast = Toast::new(format!("Saved to Downloads as {}", saved.file_name().unwrap_or_default().to_string_lossy()));
+            }
+            Ok(None) => {}
+            Err(error) => { self.attach.errors.insert(key, error); }
+        }
+    }
+    fn attachment_chips(&mut self, ui: &mut Ui, mail_index: usize, mail: &Mail) {
+        if mail.attachments.is_empty() {
+            return;
+        }
+        ui.add_space(14.);
+        ui.label(
+            RichText::new(format!("{} attachment{}", mail.attachments.len(), if mail.attachments.len() == 1 { "" } else { "s" }))
+                .small()
+                .color(MUTED),
+        );
+        let mut action = None;
+        ui.horizontal_wrapped(|ui| {
+            for (i, attachment) in mail.attachments.iter().enumerate() {
+                let key = attachment_key(mail, i);
+                let busy = self.attach.jobs.iter().any(|j| j.key == key);
+                let error = self.attach.errors.get(&key);
+                Frame::new()
+                    .fill(Color32::from_rgb(247, 248, 251))
+                    .stroke(Stroke::new(1., Color32::from_rgb(230, 232, 238)))
+                    .corner_radius(CORNER_RADIUS)
+                    .inner_margin(Margin::symmetric(10, 8))
+                    .show(ui, |ui| {
+                        ui.set_max_width(320.);
+                        ui.horizontal(|ui| {
+                            ui.add(Image::new(icons::Icon::File.source()).fit_to_exact_size(vec2(18., 18.)).tint(self.theme.color()));
+                            ui.vertical(|ui| {
+                                let name = ui.add(Label::new(RichText::new(&attachment.name).color(INK)).truncate().sense(Sense::click()))
+                                    .on_hover_text(format!("Open {}", attachment.name));
+                                if name.clicked() { action = Some((i, true)); }
+                                let detail = match error {
+                                    Some(error) => RichText::new(error).small().color(Color32::from_rgb(190, 60, 60)),
+                                    None => RichText::new(mime::human_size(attachment.size)).small().color(MUTED),
+                                };
+                                ui.add(Label::new(detail).truncate());
+                            });
+                            if busy {
+                                ui.spinner();
+                            } else {
+                                if icons::icon_button(ui, icons::Icon::Download, 24., MUTED, Color32::from_black_alpha(14))
+                                    .on_hover_text("Save to Downloads")
+                                    .clicked()
+                                {
+                                    action = Some((i, false));
+                                }
+                            }
+                        });
+                    });
+            }
+        });
+        if let Some((i, open)) = action {
+            self.attachment_action(mail_index, i, open);
+        }
+    }
     fn store_composed(&mut self, folder: &str) {
         self.save_composed(folder);
+        self.attach.outgoing.clear();
         self.editing_draft = None;
         self.compose = false;
         self.inline_reply = false;
@@ -2257,6 +2571,7 @@ impl App {
                     refs
                 })
                 .unwrap_or_default(),
+            attachments: self.outgoing_attachments(),
         };
         if let Some(idx) = self.editing_draft {
             self.mails[idx] = mail;
@@ -2723,6 +3038,7 @@ impl App {
                 }
             }
         }
+        self.poll_attachments();
         if let Some(result) = self.sending.as_ref().and_then(|rx| rx.try_recv().ok()) {
             self.sending = None;
             match result {
@@ -2781,6 +3097,7 @@ impl App {
                         .cloned();
                 }
                 self.editing_draft = None;
+                self.attach.outgoing.clear();
                 self.cc.clear();
                 self.bcc.clear();
                 self.to = self.mails[self.selected].from.clone();
@@ -2817,6 +3134,13 @@ impl App {
             self.to = m.from.clone();
             self.subject = m.subject.clone();
             self.body = m.body.clone();
+            self.attach.outgoing = m
+                .attachments
+                .iter()
+                .filter_map(|a| {
+                    Some(Outgoing { path: mime::cached_path(a.cached.as_ref()?).ok()?, name: a.name.clone(), size: a.size, mime: a.mime.clone() })
+                })
+                .collect();
         }
         self.mails[self.selected].unread = false;
         self.persist();
@@ -3007,7 +3331,8 @@ impl eframe::App for App {
         if !self.accounts.is_empty() {
             self.welcome = false;
         }
-        if self.syncing.is_some() || self.sending.is_some() || self.google_signin.is_some() || self.classifier.busy() || self.classifier.connection.is_some() {
+        self.handle_dropped_files(ctx);
+        if self.syncing.is_some() || self.sending.is_some() || self.google_signin.is_some() || self.classifier.busy() || self.classifier.connection.is_some() || self.attach.picking.is_some() || !self.attach.jobs.is_empty() {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
         if self.frames % 120 == 1 {
@@ -3479,9 +3804,14 @@ impl eframe::App for App {
                     };
                     let subject_font = if m.unread { medium(T_SMALL + 0.5) } else { FontId::proportional(T_SMALL + 0.5) };
                     mail_list_line_font(p, Rect::from_min_max(pos2(text_x, y + 36.), pos2(subject_right, y + 56.)), &m.subject, subject_font, ink);
-                    mail_list_line_font(p, Rect::from_min_max(pos2(text_x, y + 59.), pos2(right - 22., y + 77.)), &m.preview, FontId::proportional(T_SMALL), muted);
+                    let preview_right = right - if m.star && !m.attachments.is_empty() { 42. } else { 22. };
+                    mail_list_line_font(p, Rect::from_min_max(pos2(text_x, y + 59.), pos2(preview_right, y + 77.)), &m.preview, FontId::proportional(T_SMALL), muted);
                     if m.star {
                         icons::paint(p, ctx, icons::Icon::StarFilled, Rect::from_center_size(pos2(right - 7., y + 68.), vec2(14., 14.)), self.theme.color().gamma_multiply(fade));
+                    }
+                    if !m.attachments.is_empty() {
+                        let clip_x = if m.star { right - 27. } else { right - 7. };
+                        icons::paint(p, ctx, icons::Icon::Paperclip, Rect::from_center_size(pos2(clip_x, y + 68.), vec2(13., 13.)), muted);
                     }
                     if idx == self.selected {
                         if let Some(bar_y) = bar_y {
@@ -3682,14 +4012,14 @@ impl eframe::App for App {
                             .id_salt("conversation")
                             .show(ui, |ui| {
                                 let groups = threading::threads(&self.mails);
-                                let members: Vec<Mail> = self
+                                let members: Vec<(usize, Mail)> = self
                                     .mails
                                     .iter()
                                     .enumerate()
                                     .filter(|(i, _)| groups[*i] == groups[self.selected])
-                                    .map(|(_, m)| m.clone())
+                                    .map(|(i, m)| (i, m.clone()))
                                     .collect();
-                                for (index, mail) in members.iter().enumerate() {
+                                for (index, (mail_index, mail)) in members.iter().enumerate() {
                                     if index > 0 {
                                         ui.separator();
                                         ui.label(
@@ -3703,6 +4033,7 @@ impl eframe::App for App {
                                         section.format.line_height = Some(section.format.font_id.size * 1.5);
                                     }
                                     ui.add(Label::new(body).wrap());
+                                    self.attachment_chips(ui, *mail_index, mail);
                                     ui.add_space(20.);
                                 }
                                 if !self.inline_reply
@@ -3888,6 +4219,7 @@ impl eframe::App for App {
                     &self.body,
                     &self.editor.marks,
                     self.account.as_ref().map(|a| a.scope()),
+                    self.attach.outgoing.iter().map(|f| &f.path).collect::<Vec<_>>(),
                 ))
                 .unwrap_or_default();
                 if signature != self.draft_signature {
@@ -3903,6 +4235,7 @@ impl eframe::App for App {
                             || !self.bcc.is_empty()
                             || !self.subject.is_empty()
                             || !self.body.is_empty()
+                            || !self.attach.outgoing.is_empty()
                             || self.editing_draft.is_some())
                     {
                         self.save_composed("Drafts");
@@ -4006,6 +4339,17 @@ fn main() -> eframe::Result {
                 {
                     Some("toast") => app.toast = Toast::new("Moved to Trash"),
                     Some("compose") => app.begin_compose(),
+                    Some("attach") => {
+                        app.begin_compose();
+                        app.to = "sofia@example.com".into();
+                        app.subject = "Q3 report".into();
+                        app.body = "Hi Sofia,\n\nHere are the numbers and the deck for Friday.".into();
+                        for (name, size) in [("Q3 report.pdf", 1_240_000), ("Friday review.key", 8_400_000)] {
+                            let path = std::env::temp_dir().join(name);
+                            let _ = std::fs::write(&path, vec![0u8; size as usize]);
+                            app.attach.outgoing.push(Outgoing { path, name: name.into(), size, mime: mime::guess_mime(name).into() });
+                        }
+                    }
                     Some("reply") => app.action("Reply"),
                     Some("commands") => app.open_commands(),
                     Some("search") => app.open_search(),
@@ -4282,6 +4626,7 @@ mod tests {
             bcc: String::new(),
             show_bcc: false,
             draft_signature: String::new(),
+            attach: Attachments::default(),
             draft_dirty_since: None,
             draft_saved: false,
             subject: String::new(),

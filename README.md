@@ -139,6 +139,7 @@ Six accessible accent themes (all WCAG-checked in tests), crisp Lucide icons, SF
 - 🧵 **Real threading** from Gmail thread IDs, Graph conversation IDs and the `Message-ID` / `References` graph — never merged by subject alone.
 - ✍️ **Native rich editor** for compose and inline replies: bold, italic, underline, headings, code, lists, quotes. Sent as HTML with a plain-text alternative.
 - 🗂️ **Smart splits**: People · Newsletters · Notifications, plus labels for Work, Personal, Ideas, Social Media, Subscriptions and Banking.
+- 📎 **Attachments** on Gmail, Outlook and IMAP: open or save with a click, downloaded only when you need them. Attach with <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>A</kbd> or drag files onto the window; drafts keep them.
 - 💤 **Snooze, star, unread, drafts** — all local, all instant.
 - 📅 **Date sections** (Today, Yesterday, Earlier) with sticky headers.
 
@@ -158,6 +159,7 @@ Six accessible accent themes (all WCAG-checked in tests), crisp Lucide icons, SF
 | <kbd>⌘</kbd> <kbd>↵</kbd> | Send | | <kbd>U</kbd> | Toggle unread |
 | <kbd>G</kbd> → <kbd>I</kbd> <kbd>S</kbd> <kbd>T</kbd> <kbd>D</kbd> <kbd>A</kbd> | Go to Inbox, Starred, Sent… | | <kbd>1</kbd>–<kbd>4</kbd> | Switch split |
 | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>Y</kbd> | Sync all accounts | | <kbd>⌘</kbd> <kbd>,</kbd> | Settings |
+| <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>A</kbd> | Attach files | | | |
 
 </div>
 
@@ -275,6 +277,7 @@ app/
 │   ├── main.rs         UI: panes, list, swipe physics, modals, palette, search
 │   ├── storage.rs      SQLite via raw FFI — WAL, mmap, FTS5, atomic index updates
 │   ├── sync.rs         Gmail REST · Microsoft Graph · IMAP/SMTP adapters
+│   ├── mime.rs         MIME parsing/building + private attachment cache
 │   ├── oauth.rs        Google desktop OAuth: PKCE S256, loopback callback
 │   ├── credentials.rs  macOS Keychain / Linux Secret Service
 │   ├── classifier.rs   sender rules + LLM classification + learning from corrections
@@ -296,7 +299,7 @@ app/
 
 ## 🗺️ Roadmap
 
-- [ ] Attachments
+- [x] Attachments (open / save received files; attach by button or drag-and-drop)
 - [ ] Remote writeback (archive / delete / flags on the server)
 - [ ] Incremental + background sync
 - [ ] Microsoft browser sign-in

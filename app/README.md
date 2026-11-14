@@ -31,7 +31,13 @@ See [Google's desktop OAuth documentation](https://developers.google.com/identit
 
 **⌘ Shift P** (or **⌘ K**) opens searchable commands. Use up/down arrows, Enter to run, and Escape to close. **Reply** / **R** opens the writer below the conversation. Compose and replies focus the writing area at its start. The shared native rich editor supports bold, italic, underline, headings, code, and list/quote insertion. Formatting persists with local drafts and Sent messages, renders in conversations, and is sent as HTML with a plain-text MIME alternative for Gmail/SMTP (Graph uses HTML). Closing a writer saves a draft; Discard closes without saving current edits.
 
-Sync imports up to 50 recent inbox messages per click and deduplicates existing messages. Local folder moves, read flags, stars and snoozes remain local. Remote deletions, flag writeback, incremental cursors, attachments, and automatic sync are not implemented. IMAP currently reads basic RFC mail and base64 bodies; full MIME and international charset decoding remain future work. No live provider calls were made during development because no credentials were supplied.
+Sync imports up to 50 recent inbox messages per click and deduplicates existing messages. Local folder moves, read flags, stars and snoozes remain local. Remote deletions, flag writeback, incremental cursors, and automatic sync are not implemented. IMAP parses multipart MIME (base64 and quoted-printable, RFC 2047/2231 names); bodies in charsets other than UTF-8 are decoded approximately.
+
+## Attachments
+
+Received attachments appear as chips under each message, and a paperclip marks them in the list. Attachment names are searchable. Gmail and Outlook sync only record name, type and size; the file downloads when you click it (**Open** uses the default app, the download button saves to `~/Downloads` without overwriting existing files). IMAP files are kept at sync because the whole message is already downloaded. Files are cached privately (mode 0600) in the `attachments` folder beside the mailbox, never in the database.
+
+To attach files, click **Attach** (⌘ Shift A) in the writer or drag files onto the window. The picker is the system dialog (`osascript` on macOS, `zenity` or `kdialog` on Linux). Drafts and locally saved Sent messages keep their files. Messages with files are sent as `multipart/mixed`; Gmail uses its upload endpoint and Outlook uses `fileAttachment`. Limits: 25 MB per message, and 3 MB per file for Outlook / Microsoft 365. No new OAuth permissions are needed: `gmail.readonly`/`gmail.send` and `Mail.Read`/`Mail.Send` already cover attachments. Inline (`cid:`) images and forwarding are not implemented. No live provider calls were made during development because no credentials were supplied.
 
 With a configured account, **Send** sends through Gmail REST, Graph, or SMTP and saves to Sent after the server accepts the message. Without an account, **Save locally** only saves on this device. The adapter does not retry failed sends automatically. A timeout can occur after a server accepts mail; check server Sent before retrying. No automatic background sends occur.
 
@@ -51,7 +57,7 @@ Use **J/K** or **↓/↑** to move through conversations; **Enter** opens the se
 
 Press and release **G**, then within 1.5 seconds press **I** (Inbox), **S** (Starred), **H** (Snoozed), **T** (Sent), **D** (Drafts), **A** (Archive), or **X** (Trash). The footer shows the available second keys. Invalid second keys cancel the sequence; Escape cancels it immediately.
 
-While writing, **⌘ Enter** sends (or saves locally without an account), **Esc** saves and closes the draft, and **⌘ Shift Backspace** discards. **⌘ B/I/U** apply bold/italic/underline, **⌘ Shift H** applies a heading and **⌘ Shift X** applies code. Use Tab/Shift Tab to move through native form controls. Letter shortcuts are suppressed in text fields, writers and dialogs, and repeated held keys cannot trigger mail actions or resend a message. Escape closes the topmost guide, command center or settings before saving a writer.
+While writing, **⌘ Enter** sends (or saves locally without an account), **Esc** saves and closes the draft, and **⌘ Shift Backspace** discards, and **⌘ Shift A** attaches files. **⌘ B/I/U** apply bold/italic/underline, **⌘ Shift H** applies a heading and **⌘ Shift X** applies code. Use Tab/Shift Tab to move through native form controls. Letter shortcuts are suppressed in text fields, writers and dialogs, and repeated held keys cannot trigger mail actions or resend a message. Escape closes the topmost guide, command center or settings before saving a writer.
 
 ## Linux (Ubuntu)
 

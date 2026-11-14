@@ -256,6 +256,7 @@ impl Account {
                         &gmail_headers(&value["payload"]),
                         gmail_body(&value["payload"]),
                     );
+                    mail.attachments = gmail_attachments(&value["payload"]);
                     mail.remote_id = id.into();
                     mail.remote_thread = value["threadId"].as_str().unwrap_or_default().into();
                     let labels = value["labelIds"].as_array();
@@ -265,7 +266,7 @@ impl Account {
                 }
             }
             "graph" => {
-                let value: Value = serde_json::from_str(&self.get("https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$top=50&$select=id,conversationId,internetMessageId,internetMessageHeaders,from,subject,body,receivedDateTime,isRead,flag", &[("header", "Prefer: outlook.body-content-type=\"text\"".into())])?).map_err(|e| e.to_string())?;
+                let value: Value = serde_json::from_str(&self.get("https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$top=50&$select=id,conversationId,internetMessageId,internetMessageHeaders,from,subject,body,receivedDateTime,isRead,flag,hasAttachments", &[("header", "Prefer: outlook.body-content-type=\"text\"".into())])?).map_err(|e| e.to_string())?;
                 for item in value["value"]
                     .as_array()
                     .ok_or("Graph did not return messages")?
@@ -306,6 +307,10 @@ impl Account {
                     mail.time = crate::date_groups::normalize(item["receivedDateTime"].as_str().unwrap_or_default());
                     mail.unread = !item["isRead"].as_bool().unwrap_or(true);
                     mail.star = item["flag"]["flagStatus"] == "flagged";
+                    if item["hasAttachments"].as_bool().unwrap_or(false) {
+                        let list: Value = serde_json::from_str(&self.get(&format!("https://graph.microsoft.com/v1.0/me/messages/{}/attachments?$select=id,name,contentType,size,isInline", path_segment(&mail.remote_id)), &[])?).map_err(|e| e.to_string())?;
+                        mail.attachments = graph_attachments(&list);
+                    }
                     mails.push(mail);
                 }
             }
@@ -321,10 +326,7 @@ impl Account {
                     .collect();
                 for id in ids.iter().rev().take(50) {
                     let raw = self.get(&format!("{url}/;UID={id}"), &[])?;
-                    let normalized = raw.replace("\r\n", "\n");
-                    let (headers, body) =
-                        normalized.split_once("\n\n").unwrap_or((&normalized, ""));
-                    let mut mail = parse_headers(headers, body.into());
+                    let mut mail = imap_mail(raw.as_bytes(), crate::mime::store);
                     // RFC Message-ID survives UIDVALIDITY changes. Do not deduplicate by bare UID.
                     mail.remote_id = if mail.message_id.is_empty() {
                         format!("imap-{}", hash(raw.as_bytes()))
@@ -341,6 +343,32 @@ impl Account {
         }
         Ok(mails)
     }
+    /// Downloads one attachment's bytes (Gmail and Graph fetch on demand).
+    pub fn download_attachment(&self, message_id: &str, attachment: &crate::mime::Attachment) -> Result<Vec<u8>, String> {
+        if message_id.is_empty() || attachment.remote_id.is_empty() {
+            return Err("This attachment is no longer available from the server.".into());
+        }
+        let long = [("max-time", "180".to_owned())];
+        match self.provider.as_str() {
+            "gmail" => {
+                if !message_id.chars().all(|c| c.is_ascii_alphanumeric()) || !attachment.remote_id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_')) {
+                    return Err("Invalid Gmail attachment id".into());
+                }
+                let value: Value = serde_json::from_str(&self.get(&format!("https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}/attachments/{}", attachment.remote_id), &long)?).map_err(|e| e.to_string())?;
+                URL_SAFE_NO_PAD
+                    .decode(value["data"].as_str().unwrap_or_default().trim_end_matches('='))
+                    .map_err(|_| "Gmail returned an unreadable attachment".into())
+            }
+            "graph" => {
+                let value: Value = serde_json::from_str(&self.get(&format!("https://graph.microsoft.com/v1.0/me/messages/{}/attachments/{}", path_segment(message_id), path_segment(&attachment.remote_id)), &long)?).map_err(|e| e.to_string())?;
+                STANDARD
+                    .decode(value["contentBytes"].as_str().ok_or("This Outlook attachment can't be downloaded (only files are supported).")?)
+                    .map_err(|_| "Outlook returned an unreadable attachment".into())
+            }
+            _ => Err("This attachment is no longer available from the server.".into()),
+        }
+    }
+    #[allow(clippy::too_many_arguments)]
     pub fn send(
         &self,
         to: &str,
@@ -349,6 +377,7 @@ impl Account {
         subject: &str,
         body: &str,
         html: &str,
+        files: &[OutFile],
     ) -> Result<(), String> {
         if [to, cc, bcc, subject, &self.address]
             .iter()
@@ -375,13 +404,23 @@ impl Account {
             copy_headers
         };
         let to = to_recipients.join(", ");
-        let raw = format!("From: {}\r\nTo: {to}\r\n{copy_headers}Subject: {subject}\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=\"sparky-alternative\"\r\n\r\n--sparky-alternative\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n{}\r\n--sparky-alternative\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n{}\r\n--sparky-alternative--\r\n", self.address, mime_base64(body), mime_base64(html));
+        if self.provider == "graph" {
+            if let Some(big) = files.iter().find(|f| f.bytes.len() > GRAPH_FILE_LIMIT) {
+                return Err(format!("{} is larger than 3 MB, Outlook's limit for attachments sent from Sparky.", big.name));
+            }
+        }
+        let raw = mime_message(&self.address, &to, &copy_headers, subject, body, html, files);
         let (url, payload, mut options) = match self.provider.as_str() {
+            // Gmail's upload endpoint takes the raw message directly, without the JSON size cap.
+            "gmail" if !files.is_empty() => ("https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send?uploadType=media".to_owned(), raw, vec![("header", "Content-Type: message/rfc822".into())]),
             "gmail" => ("https://gmail.googleapis.com/gmail/v1/users/me/messages/send".to_owned(), serde_json::json!({"raw": URL_SAFE_NO_PAD.encode(raw)}).to_string(), vec![("header", "Content-Type: application/json".into())]),
-            "graph" => ("https://graph.microsoft.com/v1.0/me/sendMail".to_owned(), serde_json::json!({"message":{"subject":subject,"body":{"contentType":"HTML","content":html},"toRecipients":graph_recipients(&to_recipients),"ccRecipients":graph_recipients(&cc_recipients),"bccRecipients":graph_recipients(&bcc_recipients)}}).to_string(), vec![("header", "Content-Type: application/json".into())]),
+            "graph" => ("https://graph.microsoft.com/v1.0/me/sendMail".to_owned(), serde_json::json!({"message":{"subject":subject,"body":{"contentType":"HTML","content":html},"toRecipients":graph_recipients(&to_recipients),"ccRecipients":graph_recipients(&cc_recipients),"bccRecipients":graph_recipients(&bcc_recipients),"attachments":files.iter().map(|f| serde_json::json!({"@odata.type":"#microsoft.graph.fileAttachment","name":crate::mime::sanitize(&f.name),"contentType":f.mime,"contentBytes":STANDARD.encode(&f.bytes)})).collect::<Vec<_>>()}}).to_string(), vec![("header", "Content-Type: application/json".into())]),
             "imap" if valid_host(&self.smtp_host) => (format!("smtps://{}", self.smtp_host), raw, vec![("mail-from", self.address.clone()), ("mail-rcpt", to_recipients[0].clone())]),
             _ => return Err("Add a valid SMTP host in account settings to enable sending".into()),
         };
+        if !files.is_empty() {
+            options.push(("max-time", "180".into()));
+        }
         if self.provider == "imap" {
             options.retain(|(key, _)| *key != "mail-rcpt");
             options.extend(
@@ -426,6 +465,94 @@ impl Account {
         let _ = std::fs::remove_file(path);
         result
     }
+}
+/// A file to send: its display name, MIME type and contents.
+pub struct OutFile {
+    pub name: String,
+    pub mime: String,
+    pub bytes: Vec<u8>,
+}
+/// Microsoft Graph's sendMail accepts file attachments up to 3 MB each.
+pub const GRAPH_FILE_LIMIT: usize = 3 * 1024 * 1024;
+/// Total size Sparky will send in one message (Gmail's and most SMTP servers' limit).
+pub const SEND_LIMIT: usize = 25 * 1024 * 1024;
+/// RFC 5322 message: text + HTML alternative, wrapped in multipart/mixed when files are attached.
+fn mime_message(from: &str, to: &str, copy_headers: &str, subject: &str, body: &str, html: &str, files: &[OutFile]) -> String {
+    let alternative = format!("Content-Type: multipart/alternative; boundary=\"sparky-alternative\"\r\n\r\n--sparky-alternative\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n{}\r\n--sparky-alternative\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n{}\r\n--sparky-alternative--\r\n", mime_base64(body), mime_base64(html));
+    let head = format!("From: {from}\r\nTo: {to}\r\n{copy_headers}Subject: {subject}\r\nMIME-Version: 1.0\r\n");
+    if files.is_empty() {
+        return format!("{head}{alternative}");
+    }
+    // Base64 output can't contain the boundary's '-' runs, but check the readable parts too.
+    let boundary = crate::mime::boundary("mixed", &[alternative.as_bytes(), subject.as_bytes()]);
+    let mut raw = format!("{head}Content-Type: multipart/mixed; boundary=\"{boundary}\"\r\n\r\n--{boundary}\r\n{alternative}");
+    for file in files {
+        raw.push_str(&crate::mime::file_part(&boundary, &file.name, &file.mime, &file.bytes));
+    }
+    raw.push_str(&format!("--{boundary}--\r\n"));
+    raw
+}
+/// Percent-encodes an id for use as one URL path segment.
+fn path_segment(id: &str) -> String {
+    url::form_urlencoded::byte_serialize(id.as_bytes()).collect::<String>().replace('+', "%20")
+}
+/// Parses a raw IMAP message, handing each attached file to `cache` (which returns its cache name).
+fn imap_mail(raw: &[u8], cache: impl Fn(&str, &[u8]) -> Result<String, String>) -> Mail {
+    let (headers, parsed) = crate::mime::parse(raw);
+    // Body is already transfer-decoded; strip the header so it isn't decoded twice.
+    let headers: String = headers
+        .replace("\r\n", "\n")
+        .lines()
+        .filter(|l| !l.to_ascii_lowercase().starts_with("content-transfer-encoding:"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut mail = parse_headers(&headers, parsed.text);
+    mail.subject = crate::mime::decode_words(&mail.subject);
+    mail.from = crate::mime::decode_words(&mail.from);
+    mail.attachments = parsed
+        .files
+        .into_iter()
+        .map(|(mut attachment, bytes)| {
+            attachment.cached = cache(&attachment.name, &bytes).ok();
+            attachment
+        })
+        .collect();
+    mail
+}
+fn gmail_attachments(payload: &Value) -> Vec<crate::mime::Attachment> {
+    let mut found = Vec::new();
+    let filename = payload["filename"].as_str().unwrap_or_default();
+    let id = payload["body"]["attachmentId"].as_str().unwrap_or_default();
+    if !filename.is_empty() && !id.is_empty() {
+        found.push(crate::mime::Attachment {
+            name: crate::mime::sanitize(filename),
+            mime: payload["mimeType"].as_str().unwrap_or("application/octet-stream").into(),
+            size: payload["body"]["size"].as_u64().unwrap_or_default(),
+            remote_id: id.into(),
+            cached: None,
+        });
+    }
+    for part in payload["parts"].as_array().into_iter().flatten() {
+        found.extend(gmail_attachments(part));
+    }
+    found
+}
+fn graph_attachments(list: &Value) -> Vec<crate::mime::Attachment> {
+    list["value"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|a| !a["isInline"].as_bool().unwrap_or(false))
+        .filter_map(|a| {
+            Some(crate::mime::Attachment {
+                name: crate::mime::sanitize(a["name"].as_str()?),
+                mime: a["contentType"].as_str().unwrap_or("application/octet-stream").into(),
+                size: a["size"].as_u64().unwrap_or_default(),
+                remote_id: a["id"].as_str()?.into(),
+                cached: None,
+            })
+        })
+        .collect()
 }
 fn mime_base64(text: &str) -> String {
     STANDARD
@@ -496,7 +623,7 @@ fn gmail_headers(payload: &Value) -> String {
         .collect()
 }
 fn gmail_body(payload: &Value) -> String {
-    if payload["mimeType"] == "text/plain" {
+    if payload["mimeType"] == "text/plain" && payload["filename"].as_str().unwrap_or_default().is_empty() {
         return URL_SAFE_NO_PAD
             .decode(
                 payload["body"]["data"]
@@ -567,6 +694,7 @@ fn parse_headers(headers: &str, mut body: String) -> Mail {
         remote_thread: String::new(),
         message_id: header("Message-ID"),
         references,
+        attachments: Vec::new(),
     }
 }
 
@@ -672,5 +800,64 @@ mod tests {
             ),
             "Hello"
         );
+    }
+
+    #[test]
+    fn gmail_and_graph_list_attachments_without_downloading_them() {
+        let payload = serde_json::json!({"mimeType": "multipart/mixed", "parts": [
+            {"mimeType": "multipart/alternative", "parts": [
+                {"mimeType": "text/plain", "filename": "", "body": {"data": URL_SAFE_NO_PAD.encode("Hello")}},
+                {"mimeType": "text/html", "filename": "", "body": {"data": URL_SAFE_NO_PAD.encode("<b>Hello</b>")}}]},
+            {"mimeType": "application/pdf", "filename": "Q3/report.pdf", "body": {"attachmentId": "ANGjdJ_x-1", "size": 2048}},
+            {"mimeType": "text/plain", "filename": "notes.txt", "body": {"attachmentId": "ANGjdJ_y", "size": 5}}]});
+        assert_eq!(gmail_body(&payload), "Hello", "attached text files are not part of the body");
+        let found = gmail_attachments(&payload);
+        assert_eq!(found.len(), 2);
+        assert_eq!((found[0].name.as_str(), found[0].mime.as_str(), found[0].size, found[0].remote_id.as_str()), ("Q3_report.pdf", "application/pdf", 2048, "ANGjdJ_x-1"));
+        let graph = serde_json::json!({"value": [
+            {"id": "AAMk=", "name": "photo.png", "contentType": "image/png", "size": 10, "isInline": false},
+            {"id": "inline", "name": "logo.png", "contentType": "image/png", "size": 1, "isInline": true}]});
+        let found = graph_attachments(&graph);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].remote_id, "AAMk=");
+        assert_eq!(path_segment("AA/k+=="), "AA%2Fk%2B%3D%3D");
+    }
+
+    #[test]
+    fn imap_messages_keep_text_body_and_cache_attachments() {
+        let raw = "From: =?utf-8?Q?Ren=C3=A9?= <r@example.com>\r\nSubject: =?utf-8?B?w6l0w6k=?=\r\nMessage-ID: <m1@example.com>\r\nContent-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\nContent-Type: text/plain\r\nContent-Transfer-Encoding: base64\r\n\r\nSGkgdGhlcmU=\r\n--b\r\nContent-Type: image/png; name=pic.png\r\nContent-Transfer-Encoding: base64\r\n\r\niVBORw==\r\n--b--\r\n";
+        let cached = std::cell::RefCell::new(Vec::new());
+        let mail = imap_mail(raw.as_bytes(), |name, bytes| { cached.borrow_mut().push((name.to_owned(), bytes.to_vec())); Ok(format!("cache-{name}")) });
+        assert_eq!(mail.body, "Hi there");
+        assert_eq!(mail.subject, "été");
+        assert_eq!(mail.from, "René <r@example.com>");
+        assert_eq!(mail.message_id, "<m1@example.com>");
+        assert_eq!(mail.attachments.len(), 1);
+        assert_eq!(mail.attachments[0].cached.as_deref(), Some("cache-pic.png"));
+        assert_eq!(cached.borrow()[0].1, vec![0x89, b'P', b'N', b'G']);
+    }
+
+    #[test]
+    fn messages_with_files_are_multipart_mixed_and_round_trip() {
+        let plain = mime_message("me@example.com", "you@example.com", "", "Hi", "Body", "<p>Body</p>", &[]);
+        assert!(plain.contains("multipart/alternative") && !plain.contains("multipart/mixed"));
+        let files = [OutFile { name: "résumé.pdf".into(), mime: "application/pdf".into(), bytes: b"%PDF-1.7 data".to_vec() }];
+        let raw = mime_message("me@example.com", "you@example.com", "Cc: c@example.com\r\n", "Hi", "Body", "<p>Body</p>", &files);
+        assert!(raw.contains("Content-Type: multipart/mixed; boundary="));
+        assert!(raw.contains("filename*=UTF-8''r%C3%A9sum%C3%A9.pdf"));
+        let (headers, parsed) = crate::mime::parse(raw.as_bytes());
+        assert_eq!(crate::mime::header(&headers, "Cc"), "c@example.com");
+        assert_eq!(parsed.text, "Body");
+        assert_eq!(parsed.files.len(), 1);
+        assert_eq!(parsed.files[0].0.name, "résumé.pdf");
+        assert_eq!(parsed.files[0].1, b"%PDF-1.7 data");
+    }
+
+    #[test]
+    fn mailboxes_saved_before_attachments_still_load() {
+        let old = r#"{"from":"a","initials":"A","subject":"s","preview":"p","body":"b","time":"Now","category":"People","folder":"Inbox","unread":false,"star":false,"color":[1,2,3]}"#;
+        let mail: Mail = serde_json::from_str(old).unwrap();
+        assert!(mail.attachments.is_empty());
+        assert!(!serde_json::to_string(&mail).unwrap().contains("attachments"), "no field is written when there are none");
     }
 }

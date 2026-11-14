@@ -210,7 +210,8 @@ impl Store {
                     quote(&json),
                     quote(&m.from),
                     quote(&m.subject),
-                    quote(&m.body)
+                    // Attachment names are searchable alongside the body text.
+                    quote(&m.attachments.iter().fold(m.body.clone(), |text, a| text + "\n" + &a.name))
                 ))?;
             }
             self.writer.exec("COMMIT")
